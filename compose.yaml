@@ -1,0 +1,23 @@
+services:
+  nasrelay:
+    image: ghcr.io/maratangnearl/nasrelay:latest
+    container_name: nasrelay
+    restart: unless-stopped
+    init: true
+    user: "${PUID:-1000}:${PGID:-1000}"
+    ports:
+      - "${WEB_BIND:-0.0.0.0}:${WEB_PORT:-8080}:8080"
+    environment:
+      COOKIE_SECURE: "${COOKIE_SECURE:-false}"
+      TZ: "${TZ:-Asia/Seoul}"
+    volumes:
+      - "${APP_DATA_PATH:-./data}:/data"
+      - "${NAS_PATH:?Set NAS_PATH in .env}:/nas"
+    read_only: true
+    tmpfs:
+      - /tmp:size=16m,mode=1777
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    stop_grace_period: 90s
