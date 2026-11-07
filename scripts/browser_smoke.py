@@ -92,6 +92,61 @@ try:
         page.locator('#connectionBadge.connected').wait_for()
         page.locator('[data-side=ftp] .file-row').first.wait_for()
         assert page.locator('[data-side=ftp] .file-row').count() == 4
+        # Exercise date formats, missing dates and sorting against known metadata.
+        entries = [
+            {'name':'folder','path':'/folder','is_dir':True,'size':0},
+            {'name':'file10','path':'/file10','is_dir':False,'size':30,'modified':'2026-06-01T00:00:00Z','created':'20260201000000.123'},
+            {'name':'file2','path':'/file2','is_dir':False,'size':10,'modified':'20260101000000','created':'2026-03-01T09:00:00+09:00'},
+            {'name':'file3','path':'/file3','is_dir':False,'size':20,'modified':'Sun, 01 Mar 2026 00:00:00 GMT','created':'2026-01-01T00:00:00Z'},
+            {'name':'z-unknown','path':'/z-unknown','is_dir':False,'size':40,'modified':'invalid','created':''},
+        ]
+        def known_listing(route):
+            route.fulfill(json={'path':'/','entries':entries})
+        listing_pattern = '**/api/files/ftp?*'
+        page.route(listing_pattern, known_listing)
+        explorer = page.locator('[data-side=ftp]')
+        explorer.locator('.refresh').click()
+        expect(explorer.locator('.file-row')).to_have_count(5)
+        assert explorer.locator('.file-dates').count() == 0
+        explorer.locator('.display-filter summary').click()
+        explorer.locator('.date-toggle[value=modified]').check()
+        explorer.locator('.date-toggle[value=created]').check()
+        assert explorer.locator('.file-date').count() == 10
+        expect(explorer.locator('[data-path="/z-unknown"] [data-field=modified] time')).to_have_text('—')
+        for field in ['modified','created']:
+            for name in ['file2','file3','file10']:
+                assert explorer.locator(f'[data-path="/{name}"] [data-field={field}] time').text_content() != '—'
+        assert page.locator('[data-side=nas] .file-dates').count() == 0
+        explorer.locator('.display-filter summary').click()
+        for key, ascending, descending in [
+            ('name',['file2','file3','file10','z-unknown'],['z-unknown','file10','file3','file2']),
+            ('modified',['file2','file3','file10','z-unknown'],['file10','file3','file2','z-unknown']),
+            ('created',['file3','file10','file2','z-unknown'],['file2','file10','file3','z-unknown']),
+            ('size',['file2','file3','file10','z-unknown'],['z-unknown','file10','file3','file2']),
+        ]:
+            explorer.locator('.sort-key').select_option(key)
+            expect(explorer.locator('.file-name')).to_have_text(['folder'] + ascending)
+            explorer.locator('.sort-direction').click()
+            expect(explorer.locator('.file-name')).to_have_text(['folder'] + descending)
+            explorer.locator('.sort-direction').click()
+        # Range selection follows sorted order and search composes with sorting.
+        explorer.locator('.sort-key').select_option('created')
+        explorer.locator('[data-path="/file3"] .file-name').click()
+        explorer.locator('[data-path="/file2"] .file-name').click(modifiers=['Shift'])
+        assert explorer.locator('.file-row.selected').count() == 3
+        explorer.locator('.filter').fill('file')
+        expect(explorer.locator('.file-name')).to_have_text(['file3','file10','file2'])
+        explorer.locator('.select-all').uncheck()
+        assert explorer.locator('.file-row.selected').count() == 0
+        explorer.locator('.filter').fill('')
+        explorer.locator('.sort-key').select_option('name')
+        explorer.locator('.display-filter summary').click()
+        explorer.locator('.date-toggle[value=modified]').uncheck()
+        explorer.locator('.date-toggle[value=created]').uncheck()
+        explorer.locator('.display-filter summary').click()
+        page.unroute(listing_pattern, known_listing)
+        explorer.locator('.refresh').click()
+        expect(explorer.locator('.file-row')).to_have_count(4)
         # Ctrl multi-select.
         page.locator('[data-side=ftp] .file-row[data-path="/a.txt"] .file-name').click()
         page.locator('[data-side=ftp] .file-row[data-path="/b.txt"] .file-name').click(modifiers=['Control'])
@@ -149,6 +204,14 @@ try:
         phone.locator('#showHistory').check()
         phone.locator('.job-status.succeeded').nth(1).wait_for()
         phone.locator('[data-side=nas] .file-row').first.wait_for()
+        phone.locator('[data-side=nas] .display-filter summary').click()
+        phone.locator('[data-side=nas] .date-toggle[value=modified]').check()
+        phone.locator('[data-side=nas] .date-toggle[value=created]').check()
+        phone.locator('[data-side=nas] .display-filter summary').click()
+        phone.locator('[data-side=nas] .sort-key').select_option('modified')
+        phone.locator('[data-side=nas] .sort-direction').click()
+        assert phone.locator('[data-side=nas] .file-date').count() > 0
+        assert phone.evaluate('document.documentElement.scrollWidth <= 390')
         screenshot = phone.screenshot(path='/tmp/nasrelay-mobile.png',full_page=True)
         import struct
         assert struct.unpack('>I',screenshot[16:20])[0] == 390, 'Mobile horizontal overflow'
@@ -264,7 +327,7 @@ try:
             page.set_viewport_size({'width':1440,'height':1100})
         assert not errors, errors
         browser.close()
-    print(json.dumps({'browser_checks':'passed','desktop':'1440px','mobile':'390px','checks':['delayed state poll during FTP connection','admin onboarding','mandatory password change','web pause/resume','TOTP QR and key','five recovery codes','recovery download','two-factor login','recovery-code login','TOTP removal','login','connection failure/success','Ctrl selection','Shift selection','marquee selection','browser-closed transfer','history','mobile touch selection','reverse folder move','no horizontal overflow','no JavaScript errors','FTP/SFTP/WebDAV simultaneous connections','protocol defaults','profile switching','profile editing','per-server disconnect and reconnect','profile deletion','offline profile saving','profile mobile layout']},ensure_ascii=False))
+    print(json.dumps({'browser_checks':'passed','desktop':'1440px','mobile':'390px','checks':['date display filters','title/modified/created/size ascending and descending sorting','FTP/ISO/HTTP date parsing','missing dates last','search and sorted Shift selection','mobile dates without horizontal overflow','delayed state poll during FTP connection','admin onboarding','mandatory password change','web pause/resume','TOTP QR and key','five recovery codes','recovery download','two-factor login','recovery-code login','TOTP removal','login','connection failure/success','Ctrl selection','Shift selection','marquee selection','browser-closed transfer','history','mobile touch selection','reverse folder move','no horizontal overflow','no JavaScript errors','FTP/SFTP/WebDAV simultaneous connections','protocol defaults','profile switching','profile editing','per-server disconnect and reconnect','profile deletion','offline profile saving','profile mobile layout']},ensure_ascii=False))
 finally:
     process.terminate(); process.wait(timeout=45)
     ftp.close_all(); loop.close()

@@ -24,6 +24,19 @@ function formatSize(value) {
   while(n >= 1024 && unit < units.length - 1) { n /= 1024; unit++; }
   return `${n.toLocaleString('ko-KR', {maximumFractionDigits:unit ? 1 : 0})} ${units[unit]}`;
 }
+function fileTimestamp(value) {
+  if (!value) return null;
+  // FTP MLSD dates are UTC without separators; NAS/WebDAV use ISO or HTTP dates.
+  const ftp = /^(\d{4})(\d{2})(\d{2})(\d{2})(\d{2})(\d{2})(\.\d+)?$/.exec(value);
+  const timestamp = Date.parse(ftp ? `${ftp[1]}-${ftp[2]}-${ftp[3]}T${ftp[4]}:${ftp[5]}:${ftp[6]}${ftp[7] || ''}Z` : value);
+  return Number.isFinite(timestamp) ? timestamp : null;
+}
+function formatFileDate(value) {
+  const timestamp = fileTimestamp(value);
+  return timestamp === null ? '—' : new Date(timestamp).toLocaleString('ko-KR', {
+    year:'numeric',month:'2-digit',day:'2-digit',hour:'2-digit',minute:'2-digit',hour12:false
+  });
+}
 function toast(message, error = false) {
   const element = document.createElement('div');
   element.className = `toast${error ? ' error' : ''}`;
@@ -202,10 +215,24 @@ class Pane {
     this.anchor = -1;
     this.generation = 0;
     this.suppressClick = false;
+    this.sortKey = 'name';
+    this.sortDirection = 1;
     $('.path-form',this.root).addEventListener('submit',event => { event.preventDefault(); this.load($('input',event.currentTarget).value); });
     $('.up',this.root).addEventListener('click',() => this.load(this.path.split('/').slice(0,-1).join('/') || '/'));
     $('.refresh',this.root).addEventListener('click',() => this.load(this.path));
-    $('.filter',this.root).addEventListener('input',() => this.render());
+    $('.filter',this.root).addEventListener('input',() => { this.anchor = -1; this.render(); });
+    $('.sort-key',this.root).addEventListener('change',event => {
+      this.sortKey = event.target.value;
+      this.anchor = -1;
+      this.render();
+    });
+    $('.sort-direction',this.root).addEventListener('click',event => {
+      this.sortDirection *= -1;
+      event.currentTarget.textContent = this.sortDirection === 1 ? '오름차순 ↑' : '내림차순 ↓';
+      this.anchor = -1;
+      this.render();
+    });
+    $$('.date-toggle',this.root).forEach(input => input.addEventListener('change',() => this.render()));
     $('.select-all',this.root).addEventListener('change',event => {
       this.visible().forEach(entry => event.target.checked ? this.selected.add(entry.path) : this.selected.delete(entry.path));
       this.paintSelection();
@@ -250,7 +277,17 @@ class Pane {
   }
   visible() {
     const query = $('.filter',this.root).value.toLocaleLowerCase();
-    return this.entries.filter(entry => entry.name.toLocaleLowerCase().includes(query));
+    return this.entries.filter(entry => entry.name.toLocaleLowerCase().includes(query)).sort((a,b) => {
+      // Keep folders first and missing dates last in either direction.
+      if (a.is_dir !== b.is_dir) return a.is_dir ? -1 : 1;
+      const byName = a.name.localeCompare(b.name,'ko',{numeric:true,sensitivity:'base'});
+      if (this.sortKey === 'name') return this.sortDirection * byName;
+      const left = this.sortKey === 'size' ? a.size : fileTimestamp(a[this.sortKey]);
+      const right = this.sortKey === 'size' ? b.size : fileTimestamp(b[this.sortKey]);
+      if (left === null && right !== null) return 1;
+      if (right === null && left !== null) return -1;
+      return this.sortDirection * ((left - right) || byName);
+    });
   }
   async load(path = this.path) {
     const generation = ++this.generation;
@@ -286,8 +323,10 @@ class Pane {
   }
   render() {
     const entries = this.visible();
+    const dateFields = $$('.date-toggle:checked',this.root).map(input => input.value);
+    const dates = entry => dateFields.length ? `<div class="file-dates">${dateFields.map(field => `<span class="file-date" data-field="${field}" title="${field === 'modified' ? '수정 날짜' : '만든 날짜'}${fileTimestamp(entry[field]) === null ? ': 서버 또는 파일 시스템에서 제공하지 않음' : ''}">${field === 'modified' ? '수정' : '만듦'} <time>${escapeHTML(formatFileDate(entry[field]))}</time></span>`).join('')}</div>` : '';
     $('.entry-count',this.root).textContent = `${this.entries.length.toLocaleString()}개 항목`;
-    this.list.innerHTML = entries.length ? entries.map((entry,index) => `<div class="file-row" data-path="${escapeHTML(entry.path)}" data-index="${index}"><input type="checkbox" aria-label="${escapeHTML(entry.name)} 선택"><svg class="file-icon ${entry.is_dir ? 'folder-icon' : ''}" aria-hidden="true"><use href="#i-${entry.is_dir ? 'folder' : 'file'}"/></svg>${entry.is_dir ? `<button class="file-name folder-link" title="${escapeHTML(entry.name)} 폴더 열기">${escapeHTML(entry.name)}</button>` : `<span class="file-name" title="${escapeHTML(entry.name)}">${escapeHTML(entry.name)}</span>`}<span class="file-size">${entry.is_dir ? '폴더' : formatSize(entry.size)}</span><button class="drag-handle" draggable="true" aria-label="${escapeHTML(entry.name)} 전송 드래그" title="반대쪽 패널로 드래그">${icon('drag')}</button></div>`).join('') : `<div class="empty-pane"><span class="empty-icon">${icon('folder')}</span><strong>${this.entries.length ? '검색 결과가 없습니다' : '폴더가 비어 있습니다'}</strong><p>${this.entries.length ? '다른 이름으로 검색해 보세요.' : '반대쪽 파일을 선택해 이 폴더로 전송하세요.'}</p></div>`;
+    this.list.innerHTML = entries.length ? entries.map((entry,index) => `<div class="file-row" data-path="${escapeHTML(entry.path)}" data-index="${index}"><input type="checkbox" aria-label="${escapeHTML(entry.name)} 선택"><svg class="file-icon ${entry.is_dir ? 'folder-icon' : ''}" aria-hidden="true"><use href="#i-${entry.is_dir ? 'folder' : 'file'}"/></svg>${entry.is_dir ? `<button class="file-name folder-link" title="${escapeHTML(entry.name)} 폴더 열기">${escapeHTML(entry.name)}</button>` : `<span class="file-name" title="${escapeHTML(entry.name)}">${escapeHTML(entry.name)}</span>`}<span class="file-size">${entry.is_dir ? '폴더' : formatSize(entry.size)}</span><button class="drag-handle" draggable="true" aria-label="${escapeHTML(entry.name)} 전송 드래그" title="반대쪽 패널로 드래그">${icon('drag')}</button>${dates(entry)}</div>`).join('') : `<div class="empty-pane"><span class="empty-icon">${icon('folder')}</span><strong>${this.entries.length ? '검색 결과가 없습니다' : '폴더가 비어 있습니다'}</strong><p>${this.entries.length ? '다른 이름으로 검색해 보세요.' : '반대쪽 파일을 선택해 이 폴더로 전송하세요.'}</p></div>`;
     this.paintSelection();
   }
   click(event) {

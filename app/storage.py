@@ -8,6 +8,8 @@ from pathlib import Path, PurePosixPath
 import posixpath
 import ssl
 
+from .file_dates import creation_time
+
 
 def create_remote(profile):
     protocol = profile.get("protocol", "ftp")
@@ -87,7 +89,8 @@ class NAS(Storage):
             raise ValueError("일반 파일과 폴더만 지원합니다.")
         return {"name": item.name, "path": clean_path(path), "is_dir": item.is_dir(),
                 "size": 0 if item.is_dir() else info.st_size,
-                "modified": datetime.fromtimestamp(info.st_mtime, timezone.utc).isoformat()}
+                "modified": datetime.fromtimestamp(info.st_mtime, timezone.utc).isoformat(),
+                "created": creation_time(item, info)}
 
     def list(self, path):
         return sorted([self.stat(join(path, child.name)) for child in self.local(path).iterdir()
@@ -132,7 +135,13 @@ class FTPStorage(Storage):
     def list(self, path, include_internal=False):
         self.cwd(path)
         try:
-            raw = list(self.ftp.mlsd())
+            try:
+                raw = list(self.ftp.mlsd(facts=['type', 'size', 'modify', 'create']))
+            except error_perm as exc:
+                if not str(exc).startswith(('500', '501', '502', '504')):
+                    raise
+                # Some servers support MLSD but reject optional fact selection.
+                raw = list(self.ftp.mlsd())
             result = []
             for name, facts in raw:
                 if facts.get("type") not in ("dir", "file") or name in (".", ".."):
@@ -141,7 +150,8 @@ class FTPStorage(Storage):
                     continue
                 child = join(path, name)
                 result.append({"name": name, "path": child, "is_dir": facts["type"] == "dir",
-                               "size": 0 if facts["type"] == "dir" else int(facts.get("size", 0)), "modified": facts.get("modify", "")})
+                               "size": 0 if facts["type"] == "dir" else int(facts.get("size", 0)),
+                               "modified": facts.get("modify", ""), "created": facts.get("create", "")})
         except error_perm as exc:
             if not str(exc).startswith(("500", "501", "502", "504")):
                 raise
@@ -165,9 +175,9 @@ class FTPStorage(Storage):
                 size = self.ftp.size(self.remote(child))
                 if size is None:
                     raise ValueError("FTP 서버에서 파일 크기를 확인할 수 없습니다.")
-                result.append({"name": name, "path": child, "is_dir": False, "size": size, "modified": ""})
+                result.append({"name": name, "path": child, "is_dir": False, "size": size, "modified": "", "created": ""})
             else:
-                result.append({"name": name, "path": child, "is_dir": True, "size": 0, "modified": ""})
+                result.append({"name": name, "path": child, "is_dir": True, "size": 0, "modified": "", "created": ""})
             self.cwd(path)
         return result
 

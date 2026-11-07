@@ -73,7 +73,8 @@ class SFTPStorage(Storage):
             raise ValueError('일반 파일과 폴더만 지원합니다.')
         return {'name': posixpath.basename(path) or '/', 'path': path, 'is_dir': stat.S_ISDIR(info.st_mode),
                 'size': 0 if stat.S_ISDIR(info.st_mode) else info.st_size,
-                'modified': datetime.fromtimestamp(info.st_mtime, timezone.utc).isoformat()}
+                'modified': datetime.fromtimestamp(info.st_mtime, timezone.utc).isoformat(),
+                'created': ''}  # SFTP v3 has no birth-time attribute.
 
     def stat(self, path):
         path = clean_path(path)
@@ -134,7 +135,7 @@ class SFTPStorage(Storage):
 
 
 class WebDAVStorage(Storage):
-    PROPERTIES = b'''<?xml version="1.0"?><d:propfind xmlns:d="DAV:"><d:prop><d:resourcetype/><d:getcontentlength/><d:getlastmodified/></d:prop></d:propfind>'''
+    PROPERTIES = b'''<?xml version="1.0"?><d:propfind xmlns:d="DAV:"><d:prop><d:resourcetype/><d:getcontentlength/><d:getlastmodified/><d:creationdate/></d:prop></d:propfind>'''
 
     def __init__(self, profile):
         host = profile['host']
@@ -216,8 +217,14 @@ class WebDAVStorage(Storage):
             size = 0 if is_dir else int(prop.findtext('{DAV:}getcontentlength', '-1'))
             if size < 0:
                 raise ValueError('WebDAV 파일 크기를 확인할 수 없습니다.')
+            created = ''
+            for propstat in response.findall('{DAV:}propstat'):
+                status = propstat.findtext('{DAV:}status', '').split()
+                if len(status) > 1 and status[1] == '200':
+                    created = propstat.findtext('{DAV:}prop/{DAV:}creationdate', '') or created
             entries.append({'name': posixpath.basename(child) or '/', 'path': child, 'is_dir': is_dir,
-                            'size': size, 'modified': prop.findtext('{DAV:}getlastmodified', '')})
+                            'size': size, 'modified': prop.findtext('{DAV:}getlastmodified', ''),
+                            'created': created})
         return entries
 
     def stat(self, path):
