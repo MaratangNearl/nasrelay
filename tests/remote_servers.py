@@ -116,7 +116,7 @@ def sftp_server(root):
 
 
 @contextmanager
-def webdav_server(root, download_redirect=None):
+def webdav_server(root, download_redirect=None, missing_depth_zero=False, collection_slash=None):
     class Handler(BaseHTTPRequestHandler):
         protocol_version = 'HTTP/1.1'
         def log_message(self, *args): pass
@@ -143,6 +143,11 @@ def webdav_server(root, download_redirect=None):
             self.rfile.read(int(self.headers.get('Content-Length', '0')))
             local = self.local()
             if not local.exists(): return self.reply(404)
+            if missing_depth_zero and self.headers.get('Depth') == '0' and local != root:
+                return self.reply(404)
+            if local.is_dir() and local != root and collection_slash is not None:
+                if urlsplit(self.path).path.endswith('/') != collection_slash:
+                    return self.reply(404)
             items = [local]
             if self.headers.get('Depth') == '1' and local.is_dir(): items += list(local.iterdir())
             xml = ET.Element('{DAV:}multistatus')
@@ -162,7 +167,8 @@ def webdav_server(root, download_redirect=None):
             if not self.authorize(): return
             if not self.local().is_file(): return self.reply(404)
             if download_redirect is not None:
-                return self.reply(302, Location=download_redirect)
+                location = download_redirect(self.path) if callable(download_redirect) else download_redirect
+                return self.reply(302, Location=location)
             self.reply(200, self.local().read_bytes())
         def do_PUT(self):
             if not self.authorize(): return

@@ -204,8 +204,11 @@ try:
         page.locator('#download').click()
         page.locator('#transferForm button[type=submit]').click()
         page.locator("#transferDialog").wait_for(state="hidden")
+        expect(page.locator('.job-speed').first).not_to_have_text('0 B/s')
+        assert page.locator('.job-speed').first.text_content().endswith('/s')
         page.locator('[data-action=pause]').click()
         page.locator('.job-status.paused').wait_for()
+        expect(page.locator('.job-card:has(.job-status.paused) .job-speed')).to_have_text('0 B/s')
         paused = context.request.get(url + '/api/state').json()['jobs'][0]
         assert paused['status'] == 'paused'
         page.locator('[data-action=resume]').click()
@@ -362,7 +365,7 @@ try:
             page.set_viewport_size({'width':1440,'height':1100})
         assert not errors, errors
         browser.close()
-    print(json.dumps({'browser_checks':'passed','desktop':'1440px','mobile':'390px','checks':['non-modal login','external password-manager iframe autofill','autofilled values survive repeated unauthenticated responses','mobile login without horizontal overflow','date display filters','title/modified/created/size ascending and descending sorting','FTP/ISO/HTTP date parsing','missing dates last','search and sorted Shift selection','mobile dates without horizontal overflow','delayed state poll during FTP connection','admin onboarding','mandatory password change','web pause/resume','TOTP QR and key','five recovery codes','recovery download','two-factor login','recovery-code login','TOTP removal','login','connection failure/success','Ctrl selection','Shift selection','marquee selection','browser-closed transfer','history','mobile touch selection','reverse folder move','no horizontal overflow','no JavaScript errors','FTP/SFTP/WebDAV simultaneous connections','protocol defaults','profile switching','profile editing','per-server disconnect and reconnect','profile deletion','offline profile saving','profile mobile layout']},ensure_ascii=False))
+    print(json.dumps({'browser_checks':'passed','desktop':'1440px','mobile':'390px','checks':['live transfer speed','paused transfer speed zero','non-modal login','external password-manager iframe autofill','autofilled values survive repeated unauthenticated responses','mobile login without horizontal overflow','date display filters','title/modified/created/size ascending and descending sorting','FTP/ISO/HTTP date parsing','missing dates last','search and sorted Shift selection','mobile dates without horizontal overflow','delayed state poll during FTP connection','admin onboarding','mandatory password change','web pause/resume','TOTP QR and key','five recovery codes','recovery download','two-factor login','recovery-code login','TOTP removal','login','connection failure/success','Ctrl selection','Shift selection','marquee selection','browser-closed transfer','history','mobile touch selection','reverse folder move','no horizontal overflow','no JavaScript errors','FTP/SFTP/WebDAV simultaneous connections','protocol defaults','profile switching','profile editing','per-server disconnect and reconnect','profile deletion','offline profile saving','profile mobile layout']},ensure_ascii=False))
 finally:
     process.terminate(); process.wait(timeout=45)
     ftp.close_all(); loop.close()

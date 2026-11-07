@@ -12,7 +12,7 @@ import httpx
 import paramiko
 from defusedxml import ElementTree
 
-from .storage import Storage, clean_path, join
+from .storage import Storage, RetryableTransferError, clean_path, join
 
 BLOCK_SIZE = 256 * 1024
 
@@ -166,17 +166,21 @@ class WebDAVStorage(Storage):
     def properties(self, path, depth):
         # Bound XML input even when a server ignores Depth.
         url = self.url(path)
-        if depth == 1 and not url.endswith('/'):
-            url += '/'
-        headers = {'Depth': str(depth), 'Content-Type': 'application/xml; charset=utf-8'}
-        for attempt in range(2):
+        headers = {'Depth': str(depth), 'Content-Type': 'application/xml; charset=utf-8',
+                   'Cache-Control': 'no-cache'}
+        for attempt in range(3):
             with self.client.stream('PROPFIND', url, headers=headers, content=self.PROPERTIES) as response:
-                if attempt == 0 and response.status_code in (301, 302, 307, 308):
+                if attempt < 2 and response.status_code in (301, 302, 307, 308):
                     location = response.headers.get('location', '')
-                    expected = urlsplit(url).path.rstrip('/') + '/'
-                    if location in (expected, self.origin + expected):
-                        url = self.origin + expected
+                    current = httpx.URL(url)
+                    target = current.join(location)
+                    if (location and (target.scheme, target.host, target.port) == (current.scheme, current.host, current.port)
+                            and not target.query and target.path.rstrip('/') == current.path.rstrip('/') and target != current):
+                        url = str(target)
                         continue
+                if attempt == 0 and depth == 1 and response.status_code == 404 and not url.endswith('/'):
+                    url += '/'
+                    continue
                 self.check(response, multistatus=True)
                 data = bytearray()
                 for chunk in response.iter_bytes():
@@ -195,7 +199,8 @@ class WebDAVStorage(Storage):
         for response in root.findall('{DAV:}response'):
             href = urlsplit(response.findtext('{DAV:}href', ''))
             origin = urlsplit(self.origin)
-            if href.netloc and (href.scheme, href.netloc) != (origin.scheme, origin.netloc):
+            if href.netloc and (href.scheme, href.hostname, href.port or (443 if href.scheme == 'https' else 80)) != (
+                    origin.scheme, origin.hostname, origin.port or (443 if origin.scheme == 'https' else 80)):
                 raise ValueError('WebDAV 응답이 다른 서버를 가리킵니다.')
             remote = unquote(href.path).rstrip('/') or '/'
             if self.root and remote != self.root and not remote.startswith(self.root + '/'):
@@ -229,10 +234,20 @@ class WebDAVStorage(Storage):
 
     def stat(self, path):
         path = clean_path(path)
-        for entry in self.properties(path, 0):
+        try:
+            entries = self.properties(path, 0)
+        except FileNotFoundError:
+            entries = []
+        for entry in entries:
             if entry['path'] == path:
                 return entry
-        raise FileNotFoundError(path)
+        # Some cloud DAV servers list children but return 404 for Depth: 0.
+        # Re-read the parent instead of trusting metadata cached at submission.
+        if path != '/':
+            for entry in self.list(posixpath.dirname(path)):
+                if entry['path'] == path:
+                    return entry
+        raise FileNotFoundError(f'WebDAV 파일을 찾을 수 없습니다 (속성 조회): {path}')
 
     def list(self, path):
         path = clean_path(path)
@@ -272,11 +287,18 @@ class WebDAVStorage(Storage):
         # Cloud WebDAV servers may redirect GET to a signed CDN URL. HTTPX
         # strips Authorization on cross-origin redirects; other DAV methods
         # continue to use the client's no-redirect default.
-        with self.client.stream('GET', self.url(path), headers={'Accept-Encoding': 'identity'},
-                                follow_redirects=True) as response:
-            self.check(response)
-            for chunk in response.iter_bytes(chunk_size=BLOCK_SIZE):
-                callback(chunk)
+        try:
+            with self.client.stream('GET', self.url(path),
+                                    headers={'Accept-Encoding': 'identity', 'Cache-Control': 'no-cache'},
+                                    follow_redirects=True) as response:
+                if response.status_code in (404, 410) or (response.history and response.status_code == 403):
+                    raise RetryableTransferError(f'WebDAV 다운로드 주소를 다시 확인해야 합니다 (HTTP {response.status_code})')
+                self.check(response)
+                for chunk in response.iter_bytes(chunk_size=BLOCK_SIZE):
+                    callback(chunk)
+        except httpx.TransportError as exc:
+            # Do not expose signed URLs or credentials through exception strings.
+            raise RetryableTransferError(f'WebDAV 다운로드 연결이 끊겼습니다 ({type(exc).__name__})') from None
 
     def upload(self, path, file, callback):
         def chunks():

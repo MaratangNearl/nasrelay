@@ -315,7 +315,7 @@ def create_app(data_dir=None, nas_root=None, password=None, start_workers=True):
             return {"version": __version__, "connected": bool(selected and selected["connected"]), "profile": selected,
                     "profiles": profiles, "selected_profile_id": selected_id,
                     "telegram": {"enabled": config["enabled"], "chat_id": config["chat_id"], "has_token": bool(config["token"])},
-                    "jobs": [public_job(j) for j in app.state.store.jobs()[:100]]}
+                    "jobs": [public_job(j, app.state.store.transfer_rates) for j in app.state.store.jobs()[:100]]}
 
     @app.get("/api/profiles", dependencies=[Depends(auth)])
     def list_profiles():
@@ -418,7 +418,7 @@ def create_app(data_dir=None, nas_root=None, password=None, start_workers=True):
 
     @app.get("/api/jobs/{job_id}", dependencies=[Depends(auth)])
     def get_job(job_id: str):
-        return public_job(app.state.store.job(job_id))
+        return public_job(app.state.store.job(job_id), app.state.store.transfer_rates)
 
     @app.post("/api/jobs/{job_id}/retry", dependencies=[Depends(auth)])
     def retry(job_id: str):

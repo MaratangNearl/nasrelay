@@ -8,6 +8,8 @@ from pathlib import Path
 
 from cryptography.fernet import Fernet
 
+from .transfer_rates import TransferRates
+
 
 class Store:
     def __init__(self, directory: Path):
@@ -22,6 +24,7 @@ class Store:
                 f.write(Fernet.generate_key())
         self.crypto = Fernet(keyfile.read_bytes())
         self.lock = threading.RLock()
+        self.transfer_rates = TransferRates()
         self.db = sqlite3.connect(directory / "app.sqlite3", check_same_thread=False)
         self.db.execute("PRAGMA journal_mode=WAL")
         self.db.execute("PRAGMA synchronous=FULL")

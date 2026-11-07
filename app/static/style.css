@@ -23,3 +23,6 @@
 /* Keep password-manager overlays outside the login card interactive. */
 .login-screen{min-height:100dvh;display:flex;align-items:center;justify-content:center;padding:20px 0;background:#edf2ee}
 .login-card{margin:auto;max-width:calc(100vw - 32px);max-height:none;overflow:visible}
+
+.job-speed{flex-shrink:0;color:#397750;font-variant-numeric:tabular-nums;white-space:nowrap}
+.job-meta>span.job-speed{max-width:none;overflow:visible;margin-left:auto}

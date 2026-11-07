@@ -2,7 +2,7 @@ import logging
 import threading
 import httpx
 
-from .worker import control_job
+from .worker import control_job, public_job
 
 log = logging.getLogger(__name__)
 
@@ -66,12 +66,14 @@ class TelegramBot:
             return "진행중인 작업 없음"
         lines = []
         for job in jobs[:10]:
+            speed = public_job(job, self.store.transfer_rates)['speed_bytes_per_second']
             progress = min(100, job["transferred_bytes"] * 100 / job["total_bytes"]) if job["total_bytes"] else 0
             label = "⏸ 일시정지" if job["status"] == "paused" else "⏳ 일시정지 요청 중" if job.get("pause_requested") else "⏳ 대기" if job["status"] == "queued" else "🔄 전송 중"
             lines.append(f"{label} · {job['id'][:8]}\n"
                          f"{job.get('profile_name') or '원격 서버'} · {job.get('protocol', 'ftp').upper()} · {'서버 → NAS' if job['direction'] == 'download' else 'NAS → 서버'} · {progress:.1f}%\n"
                          f"{job['completed_files']:,}/{job['total_files']:,}개 · "
-                         f"{size(job['transferred_bytes'])}/{size(job['total_bytes'])}\n{job['current_file']}")
+                         f"{size(job['transferred_bytes'])}/{size(job['total_bytes'])}\n"
+                         f"현재 속도: {size(speed)}/s\n{job['current_file']}")
         return "\n\n".join(lines)
 
     def handle_message(self, config, message):
@@ -97,7 +99,7 @@ class TelegramBot:
             except ValueError as exc:
                 reply = str(exc)
         elif command in ("/start", "/help"):
-            reply = ("nasrelay에 연결되었습니다.\n/status — 진행률·작업 ID\n"
+            reply = ("nasrelay에 연결되었습니다.\n/status — 진행률·현재 전송속도·작업 ID\n"
                      "/pause [작업ID] — 일시정지\n/resume [작업ID] — 재개\n/cancel [작업ID] — 취소\n"
                      "작업이 여러 개면 /status에서 확인한 ID 8자 이상을 입력하세요.\n전송 완료·실패·취소 시 알림을 보냅니다.")
         else:

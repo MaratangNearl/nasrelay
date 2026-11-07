@@ -11,6 +11,10 @@ import ssl
 from .file_dates import creation_time
 
 
+class RetryableTransferError(Exception):
+    """A read failed temporarily; discard its partial file before retrying."""
+
+
 def create_remote(profile):
     protocol = profile.get("protocol", "ftp")
     if protocol == "ftp":

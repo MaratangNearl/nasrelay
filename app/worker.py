@@ -7,7 +7,7 @@ import uuid
 from contextlib import suppress
 from datetime import datetime, timezone
 
-from .storage import create_remote, NAS, clean_path, join
+from .storage import create_remote, NAS, RetryableTransferError, clean_path, join
 
 log = logging.getLogger(__name__)
 TERMINAL = {"succeeded", "failed", "cancelled"}
@@ -17,7 +17,7 @@ def now():
     return datetime.now(timezone.utc).isoformat()
 
 
-def public_job(job):
+def public_job(job, rates=None):
     fields = ("id", "direction", "mode", "sources", "destination", "status", "created_at", "finished_at",
               "total_files", "total_bytes", "completed_files", "completed_bytes", "transferred_bytes",
               "current_file", "error", "cancel_requested", "pause_requested", "warnings",
@@ -26,6 +26,7 @@ def public_job(job):
     total = job.get("total_bytes", 0)
     result["progress"] = min(100, round(job.get("transferred_bytes", 0) * 100 / total, 1)) if total else (100 if job["status"] == "succeeded" else 0)
     result["failed_files"] = sum(bool(x.get("error")) for x in job.get("files", []))
+    result["speed_bytes_per_second"] = rates.current(job['id']) if rates and job['status'] == 'running' else 0.0
     return result
 
 
@@ -73,7 +74,7 @@ def control_job(store, action, job_id=None):
                 changes.update(status="cancelled", finished_at=now(), current_file="")
         else:
             raise ValueError("지원하지 않는 작업 명령입니다.")
-        return public_job(store.patch(job["id"], **changes))
+        return public_job(store.patch(job["id"], **changes), store.transfer_rates)
 
 
 class TransferWorker:
@@ -184,18 +185,19 @@ class TransferWorker:
         files, directories = [], []
         seen = set()
 
-        def walk(path, target, depth=0):
+        def walk(path, target, depth=0, info=None):
             self.checkpoint(job["id"])
             if depth > 64 or len(seen) >= 100000:
                 raise ValueError("폴더 깊이 또는 파일 수 제한을 초과했습니다.")
             if path in seen:
                 raise ValueError("중복 또는 순환 경로입니다.")
             seen.add(path)
-            info = source.stat(path)
+            if info is None:
+                info = source.stat(path)
             if info["is_dir"]:
                 directories.append({"source": path, "target": target})
                 for entry in source.list(path):
-                    walk(entry["path"], join(target, entry["name"]), depth + 1)
+                    walk(entry["path"], join(target, entry["name"]), depth + 1, entry)
             else:
                 files.append({"source": path, "target": target, "size": info["size"],
                               "modified": info.get("modified", ""), "phase": "pending", "error": ""})
@@ -213,6 +215,7 @@ class TransferWorker:
     def execute(self, job):
         remote = None
         job_id = job["id"]
+        tracking = False
         try:
             with self.store.lock:
                 job = self.store.job(job_id)
@@ -225,6 +228,8 @@ class TransferWorker:
             if not job["planned"]:
                 job = self.plan(job, source)
             self.store.patch(job_id, status="running")
+            self.store.transfer_rates.start(job_id)
+            tracking = True
             for directory in job["directories"]:
                 self.checkpoint(job_id)
                 destination.mkdir(directory["target"])
@@ -234,7 +239,19 @@ class TransferWorker:
                     continue
                 self.store.patch(job_id, current_file=item["source"])
                 try:
-                    self.transfer(job, index, source, destination, remote)
+                    for attempt in range(3):
+                        try:
+                            self.transfer(job, index, source, destination, remote)
+                            break
+                        except RetryableTransferError:
+                            if attempt == 2:
+                                raise
+                            self.checkpoint(job_id)
+                            remote.close()
+                            self.stop.wait(0.5 * (attempt + 1))
+                            self.checkpoint(job_id)
+                            remote = create_remote(self.store.unseal(job["profile"]))
+                            source, destination = (remote, self.nas) if job["direction"] == "download" else (self.nas, remote)
                 except Interrupted:
                     raise
                 except Exception as exc:
@@ -275,6 +292,8 @@ class TransferWorker:
         except Exception as exc:
             self.store.patch(job_id, status="failed", error=str(exc)[:4000], finished_at=now(), current_file="")
         finally:
+            if tracking:
+                self.store.transfer_rates.stop(job_id)
             if remote:
                 remote.close()
 
@@ -302,6 +321,7 @@ class TransferWorker:
                 nonlocal transferred, last
                 self.checkpoint(job_id)
                 transferred += len(data)
+                self.store.transfer_rates.record(job_id, len(data))
                 if time.monotonic() - last > 0.5:
                     self.store.patch(job_id, transferred_bytes=base + transferred)
                     last = time.monotonic()

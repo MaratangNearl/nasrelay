@@ -8,6 +8,7 @@ import pytest
 from app.remotes import WebDAVStorage
 from app.store import Store
 from app.worker import TransferWorker
+from app.storage import RetryableTransferError
 from remote_servers import webdav_server
 
 
@@ -74,7 +75,7 @@ def test_redirected_download_checks_final_error_and_keeps_dav_writes_local():
     storage.client.close()
     storage.client = httpx.Client(transport=httpx.MockTransport(handler))
     try:
-        with pytest.raises(ValueError, match=r'^WebDAV 요청 실패 \(HTTP 403\)$'):
+        with pytest.raises(RetryableTransferError, match=r'^WebDAV 다운로드 주소를 다시 확인해야 합니다 \(HTTP 403\)$'):
             storage.download('/file', lambda chunk: pytest.fail('Unexpected error body'))
         requests.clear()
         with pytest.raises(ValueError, match='HTTP 302'):
