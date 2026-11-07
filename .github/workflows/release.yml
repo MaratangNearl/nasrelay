@@ -85,7 +85,7 @@ jobs:
           for attempt in range(60):
               try:
                   with urllib.request.urlopen('http://127.0.0.1:18080/health', timeout=2) as response:
-                      assert json.load(response)['version'] == '1.1.0'
+                      assert json.load(response)['version'] == '1.1.1'
                   break
               except Exception:
                   time.sleep(0.5)

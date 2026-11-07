@@ -54,8 +54,43 @@ try:
         page = context.new_page()
         page.on('pageerror',lambda err:errors.append(str(err)))
         page.goto(url)
-        page.locator('#loginForm input[name=username]').fill('admin')
-        page.locator('#loginForm input[name=password]').fill('admin')
+        page.locator('#loginDialog').wait_for(state='visible')
+        assert page.locator(':modal').count() == 0
+        assert page.locator('#shell').is_hidden()
+        expect(page.locator('#loginForm input[name=username]')).to_have_attribute('autocomplete','username')
+        expect(page.locator('#loginForm input[name=password]')).to_have_attribute('autocomplete','current-password')
+        # Password managers inject their own iframe outside the login form.
+        # A native modal makes that iframe inert, even with a high z-index.
+        page.evaluate('''() => {
+            const frame = document.createElement('iframe');
+            frame.id = 'passwordManagerTest';
+            frame.title = 'Password manager autofill';
+            Object.assign(frame.style, {position:'fixed',right:'20px',top:'20px',width:'240px',height:'60px',zIndex:'2147483647'});
+            document.body.append(frame);
+            const button = frame.contentDocument.createElement('button');
+            button.textContent = 'Fill saved login';
+            button.addEventListener('click', () => {
+                for (const name of ['username','password']) {
+                    const input = document.querySelector(`#loginForm input[name=${name}]`);
+                    input.value = 'admin';
+                    input.dispatchEvent(new Event('input',{bubbles:true}));
+                    input.dispatchEvent(new Event('change',{bubbles:true}));
+                }
+            });
+            frame.contentDocument.body.append(button);
+        }''')
+        page.locator('#loginForm input[name=password]').focus()
+        page.frame_locator('#passwordManagerTest').get_by_role('button',name='Fill saved login').click()
+        expect(page.locator('#loginForm input[name=password]')).to_have_value('admin')
+        # Repeated unauthenticated responses must not wipe an autofilled form.
+        page.evaluate('showLogin(); showLogin();')
+        expect(page.locator('#loginForm input[name=password]')).to_have_value('admin')
+        page.evaluate("document.querySelector('#passwordManagerTest').remove()")
+        page.screenshot(path='/tmp/nasrelay-login-desktop.png',full_page=True)
+        page.set_viewport_size({'width':390,'height':844})
+        assert page.evaluate('document.documentElement.scrollWidth <= 390')
+        page.screenshot(path='/tmp/nasrelay-login-mobile.png',full_page=True)
+        page.set_viewport_size({'width':1440,'height':1100})
         page.locator('#loginForm button[type=submit]').click()
         page.locator('#passwordDialog').wait_for(state='visible')
         assert context.request.get(url + '/api/state').status == 403
@@ -327,7 +362,7 @@ try:
             page.set_viewport_size({'width':1440,'height':1100})
         assert not errors, errors
         browser.close()
-    print(json.dumps({'browser_checks':'passed','desktop':'1440px','mobile':'390px','checks':['date display filters','title/modified/created/size ascending and descending sorting','FTP/ISO/HTTP date parsing','missing dates last','search and sorted Shift selection','mobile dates without horizontal overflow','delayed state poll during FTP connection','admin onboarding','mandatory password change','web pause/resume','TOTP QR and key','five recovery codes','recovery download','two-factor login','recovery-code login','TOTP removal','login','connection failure/success','Ctrl selection','Shift selection','marquee selection','browser-closed transfer','history','mobile touch selection','reverse folder move','no horizontal overflow','no JavaScript errors','FTP/SFTP/WebDAV simultaneous connections','protocol defaults','profile switching','profile editing','per-server disconnect and reconnect','profile deletion','offline profile saving','profile mobile layout']},ensure_ascii=False))
+    print(json.dumps({'browser_checks':'passed','desktop':'1440px','mobile':'390px','checks':['non-modal login','external password-manager iframe autofill','autofilled values survive repeated unauthenticated responses','mobile login without horizontal overflow','date display filters','title/modified/created/size ascending and descending sorting','FTP/ISO/HTTP date parsing','missing dates last','search and sorted Shift selection','mobile dates without horizontal overflow','delayed state poll during FTP connection','admin onboarding','mandatory password change','web pause/resume','TOTP QR and key','five recovery codes','recovery download','two-factor login','recovery-code login','TOTP removal','login','connection failure/success','Ctrl selection','Shift selection','marquee selection','browser-closed transfer','history','mobile touch selection','reverse folder move','no horizontal overflow','no JavaScript errors','FTP/SFTP/WebDAV simultaneous connections','protocol defaults','profile switching','profile editing','per-server disconnect and reconnect','profile deletion','offline profile saving','profile mobile layout']},ensure_ascii=False))
 finally:
     process.terminate(); process.wait(timeout=45)
     ftp.close_all(); loop.close()

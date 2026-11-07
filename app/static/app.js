@@ -74,12 +74,14 @@ function showLogin() {
   loggedIn = false;
   $('#shell').hidden = true;
   $$('dialog[open]').forEach(dialog => dialog.close());
+  if (!$('#loginDialog').hidden) return;
+  $('#loginError').textContent = '';
   $('#loginForm').reset();
   $('#passwordForm').reset();
   recoveryCodes = []; $('#recoveryCodes').replaceChildren();
   $('#loginCodeField').hidden = true;
   $('#loginForm input[name=code]').required = false;
-  $('#loginDialog').showModal();
+  $('#loginDialog').hidden = false;
 }
 function showDialog(id) {
   const dialog = $(id);
@@ -442,7 +444,7 @@ async function performRefresh(initial = false) {
     if (requestEpoch !== authEpoch || authChangesInFlight > 0) return;
     state = latest;
     loggedIn = true;
-    $('#loginDialog').close();
+    $('#loginDialog').hidden = true;
     $('#shell').hidden = false;
     updateConnection();
     $('#telegramDot').classList.toggle('on',state.telegram.enabled);
@@ -462,12 +464,11 @@ async function performRefresh(initial = false) {
     }
   } catch (err) {
     if (err.staleAuth) return;
-    if (initial && !$('#loginDialog').open) toast(err.message,true);
+    if (initial && $('#loginDialog').hidden) toast(err.message,true);
     else if (loggedIn) $('#connectionDescription').textContent = err.message;
   }
 }
 $$('.close-dialog').forEach(button => button.addEventListener('click',() => button.closest('dialog').close()));
-$('#loginDialog').addEventListener('cancel',event => event.preventDefault());
 $('#loginForm').addEventListener('submit',event => {
   event.preventDefault();
   formAction(event.currentTarget,async () => {
@@ -601,13 +602,13 @@ async function bootstrap() {
     if (account.must_change_password) {
       loggedIn = false;
       $('#shell').hidden = true;
-      $('#loginDialog').close();
+      $('#loginDialog').hidden = true;
       openPasswordDialog();
       return;
     }
     await refreshState(true);
   } catch(err) {
-    if (!$('#loginDialog').open) showLogin();
+    if ($('#loginDialog').hidden) showLogin();
   }
 }
 function openPasswordDialog() {
