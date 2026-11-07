@@ -116,7 +116,7 @@ def sftp_server(root):
 
 
 @contextmanager
-def webdav_server(root):
+def webdav_server(root, download_redirect=None):
     class Handler(BaseHTTPRequestHandler):
         protocol_version = 'HTTP/1.1'
         def log_message(self, *args): pass
@@ -161,6 +161,8 @@ def webdav_server(root):
         def do_GET(self):
             if not self.authorize(): return
             if not self.local().is_file(): return self.reply(404)
+            if download_redirect is not None:
+                return self.reply(302, Location=download_redirect)
             self.reply(200, self.local().read_bytes())
         def do_PUT(self):
             if not self.authorize(): return

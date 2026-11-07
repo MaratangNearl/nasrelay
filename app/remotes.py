@@ -269,7 +269,11 @@ class WebDAVStorage(Storage):
         self.request('DELETE', path)
 
     def download(self, path, callback):
-        with self.client.stream('GET', self.url(path), headers={'Accept-Encoding': 'identity'}) as response:
+        # Cloud WebDAV servers may redirect GET to a signed CDN URL. HTTPX
+        # strips Authorization on cross-origin redirects; other DAV methods
+        # continue to use the client's no-redirect default.
+        with self.client.stream('GET', self.url(path), headers={'Accept-Encoding': 'identity'},
+                                follow_redirects=True) as response:
             self.check(response)
             for chunk in response.iter_bytes(chunk_size=BLOCK_SIZE):
                 callback(chunk)
