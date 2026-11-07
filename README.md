@@ -2,9 +2,9 @@
 
 NAS에서 실행하는 양방향 FTP·SFTP·WebDAV 파일 전송 Docker 애플리케이션입니다. 스마트폰의 웹 UI에서 작업을 등록하면 NAS가 전송하며 **브라우저를 닫아도 작업은 계속됩니다.** 텔레그램으로 결과 알림과 `/status` 조회를 지원합니다.
 
-- 버전: **1.2.1**
+- 버전: **1.2.2**
 - 이미지: `ghcr.io/maratangnearl/nasrelay:latest`
-- 고정 버전: `ghcr.io/maratangnearl/nasrelay:1.2.1`
+- 고정 버전: `ghcr.io/maratangnearl/nasrelay:1.2.2`
 - 플랫폼: `linux/amd64`, `linux/arm64`
 
 ## 주요 기능
@@ -185,7 +185,7 @@ docker compose pull
 docker compose up -d
 ```
 
-`latest`는 안정 버전 태그에서 발행됩니다. 버전을 고정하려면 `compose.yaml`의 이미지 태그를 `1.2.1`으로 바꿉니다. `main` 개발 빌드는 `edge` 태그로 게시됩니다.
+`latest`는 안정 버전 태그에서 발행됩니다. 버전을 고정하려면 `compose.yaml`의 이미지 태그를 `1.2.2`으로 바꿉니다. `main` 개발 빌드는 `edge` 태그로 게시됩니다.
 
 ### 이전 다운로드 파일이 SFTPGo에서 열리지 않는 경우
 
@@ -243,15 +243,15 @@ python scripts/browser_smoke.py
 워크플로는 테스트 후 `amd64`와 `arm64` 이미지를 빌드합니다. 저장소의 `GITHUB_TOKEN`과 `packages: write` 권한을 사용하며 별도 레지스트리 비밀번호를 저장하지 않습니다.
 
 - `main` push: `ghcr.io/maratangnearl/nasrelay:edge`
-- `v1.2.1` 태그 push: `:1.2.1`, `:1.2`, `:latest`
+- `v1.2.2` 태그 push: `:1.2.2`, `:1.2`, `:latest`
 - Pull request: 테스트와 이미지 빌드만 실행, 레지스트리 push 없음
 - 시험판 버전의 semver 태그는 `latest`로 승격하지 않음
 
 다음 버전은 `app/__init__.py`, Dockerfile, 웹 UI, README와 워크플로의 컨테이너 검사 버전을 함께 수정하고 테스트한 뒤 태그를 생성합니다. 태그 빌드의 이미지 게시와 컨테이너 검사가 성공하면 변경 사항과 업데이트 방법을 담은 GitHub Release를 발행합니다.
 
 ```bash
-git tag v1.2.2
-git push origin main v1.2.2
+git tag v1.2.3
+git push origin main v1.2.3
 ```
 
 ## 구조 및 향후 계획

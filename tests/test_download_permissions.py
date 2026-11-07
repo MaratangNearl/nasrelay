@@ -144,6 +144,7 @@ def test_crash_partial_is_recreated_with_normal_creation_mode(tmp_path):
 def test_private_umask_is_respected_without_changing_process_umask(tmp_path):
     script = '''
 import os, sys
+from pathlib import Path
 from app.storage import NAS
 os.umask(0o077)
 nas = NAS(Path(sys.argv[1]))

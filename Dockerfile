@@ -2,7 +2,7 @@ FROM python:3.12-slim
 LABEL org.opencontainers.image.title="nasrelay" \
       org.opencontainers.image.description="NAS-hosted FTP, SFTP and WebDAV file transfers with Telegram notifications" \
       org.opencontainers.image.source="https://github.com/MaratangNearl/nasrelay" \
-      org.opencontainers.image.version="1.2.1"
+      org.opencontainers.image.version="1.2.2"
 ENV PYTHONDONTWRITEBYTECODE=1 PYTHONUNBUFFERED=1 DATA_DIR=/data NAS_ROOT=/nas
 WORKDIR /app
 COPY requirements.lock .
