@@ -328,8 +328,7 @@ class TransferWorker:
 
             try:
                 if direction == "download":
-                    local_temp = self.nas.local(temp)
-                    fd = os.open(local_temp, os.O_WRONLY | os.O_CREAT | os.O_TRUNC | os.O_NOFOLLOW, 0o600)
+                    fd, item['destination_mode'] = self.nas.create_download_temp(temp)
                     with os.fdopen(fd, "wb") as output:
                         def receive(data):
                             output.write(data)
@@ -358,10 +357,12 @@ class TransferWorker:
                     raise ValueError("임시 파일 크기 검증 실패")
                 if direction == "download":
                     local_temp, target = self.nas.local(temp), self.nas.local(item["target"])
-                    if target.exists():
+                    published = target.exists()
+                    if published:
                         if not os.path.samefile(local_temp, target):
                             raise FileExistsError(f"대상 파일이 이미 있습니다: {item['target']}")
-                    else:
+                    self.nas.finish_download_permissions(temp, item.get('destination_mode'))
+                    if not published:
                         os.link(local_temp, target)  # Atomic, never replaces an existing NAS file.
                     local_temp.unlink()
                     fd = os.open(target.parent, os.O_RDONLY | os.O_DIRECTORY)

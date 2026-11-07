@@ -7,6 +7,8 @@ import os
 from pathlib import Path, PurePosixPath
 import posixpath
 import ssl
+import stat
+import uuid
 
 from .file_dates import creation_time
 
@@ -100,6 +102,41 @@ class NAS(Storage):
         return sorted([self.stat(join(path, child.name)) for child in self.local(path).iterdir()
                        if not child.is_symlink() and not child.name.startswith(".ftn-")],
                       key=lambda x: (not x["is_dir"], x["name"].casefold()))
+
+    def create_download_temp(self, path):
+        item = self.local(path)
+        # A pending job may have left an incomplete file after a process crash.
+        # Recreate it so the current directory ACL and process umask apply.
+        item.unlink(missing_ok=True)
+        fd = os.open(item, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW, 0o666)
+        try:
+            mode = stat.S_IMODE(os.fstat(fd).st_mode)
+            os.fchmod(fd, 0o600)  # Keep partial contents private until verified.
+            return fd, mode
+        except BaseException:
+            os.close(fd)
+            item.unlink(missing_ok=True)
+            raise
+
+    def default_file_mode(self, parent):
+        probe = self.local(join(parent, f'.ftn-{uuid.uuid4().hex}.mode'))
+        fd = os.open(probe, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW, 0o666)
+        try:
+            return stat.S_IMODE(os.fstat(fd).st_mode)
+        finally:
+            os.close(fd)
+            probe.unlink()
+
+    def finish_download_permissions(self, path, mode=None):
+        if mode is None:
+            # Old staged jobs do not have a recorded destination mode.
+            mode = self.default_file_mode(posixpath.dirname(clean_path(path)))
+        fd = os.open(self.local(path), os.O_RDONLY | os.O_NOFOLLOW)
+        try:
+            os.fchmod(fd, mode)
+            os.fsync(fd)
+        finally:
+            os.close(fd)
 
     def mkdir(self, path):
         self.local(path).mkdir(parents=True, exist_ok=True)
